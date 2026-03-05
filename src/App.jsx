@@ -18,12 +18,13 @@ const VOLTAGE_PRESETS = [
   { label: "120/208V", factor: 0.360 },
 ];
 const DEFAULT_CATEGORIES = [
-  { name: "Retail",      wattsPerSqft: 30, isHousePanel: false },
-  { name: "Restaurant",  wattsPerSqft: 50, isHousePanel: false },
-  { name: "Office",      wattsPerSqft: 15, isHousePanel: false },
-  { name: "House Panel", wattsPerSqft: 0,  isHousePanel: true  },
+  { name: "Retail", wattsPerSqft: 30, isHousePanel: false },
+  { name: "Restaurant", wattsPerSqft: 50, isHousePanel: false },
+  { name: "Office", wattsPerSqft: 15, isHousePanel: false },
+  { name: "House Panel", wattsPerSqft: 0, isHousePanel: true },
 ];
 const SERVICE_SIZES = [100, 200, 400, 600, 800, 1000, 1200, 2000];
+const SELECTABLE_SIZES = [100, 200, 400, 600, 800];
 const getServiceSize = (a) => SERVICE_SIZES.find((s) => a <= s) || 2000;
 const calcKVA = (sqft, w) => (Number(sqft) * Number(w)) / 1000;
 const calcAmps = (kva, f) => (kva > 0 ? kva / f : 0);
@@ -56,7 +57,7 @@ function getSlot(serviceSize, rules) {
 let _id = 1;
 const uid = () => _id++ + "-" + Math.random().toString(36).slice(2);
 const blankTenant = (b = 1, cat = "Retail") => ({
-  id: uid(), building: b, name: "", category: cat, sqft: "", fixedKVA: "",
+  id: uid(), building: b, name: "", category: cat, sqft: "", fixedKVA: "", serviceOverride: "",
 });
 const BLANK_PROJECT = { name: "", number: "", buildings: 1 };
 const BLANK_WIREWAY = { availableWallFeet: "" };
@@ -236,30 +237,31 @@ function ConfirmInline({ message, onConfirm, onCancel }) {
 }
 
 // ─── Wireway Diagram ──────────────────────────────────────────────────────────
-function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt }) {
+function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps }) {
   const bp = useBreakpoint();
   const ok = availFt > 0 && totalFt <= availFt;
   const W = bp.mobile ? 400 : bp.tablet ? 560 : 700;
   const PAD = 48;
   const scale = totalIn > 0 ? Math.min((W - PAD * 2) / totalIn, 5) : 1;
 
-  // Build tenant segments (everything after tap can + 6" gap)
+  // Build tenant segments
   const tenantSegs = [];
   let tx = 0;
   const pushT = (seg) => { tenantSegs.push({ ...seg, rx: tx }); tx += seg.w; };
 
-  // Initial 6" gap after tap can
+  // Initial 6″ gap after tap can
   pushT({ w: POST_TAP_GAP * scale, kind: "gap", col: "transparent", label: `${POST_TAP_GAP}"` });
 
   tenantSlots.forEach((ts) => {
     const sl = ts.slot;
     if (sl.type === "Stacked") {
-      pushT({ w: sl.disconnectIn * scale, kind: "stacked", label: ts.name || ts.category, sub: `${sl.disconnectIn}" stacked`, col: C.blue });
+      pushT({ w: sl.disconnectIn * scale, kind: "equip", label: ts.name || ts.category, sub: `${sl.disconnectIn}"`, col: C.blue, serviceSize: ts.serviceSize, showMeter: true });
       pushT({ w: sl.gapIn * scale, kind: "gap", col: "transparent" });
     } else {
-      pushT({ w: sl.disconnectIn * scale, kind: "disc", label: ts.name || ts.category, sub: `${sl.disconnectIn}" disc`, col: C.amber });
+      // Side by side: meter + divider + disconnect
+      pushT({ w: sl.meterIn * scale, kind: "meter-only", label: "METER", sub: `${sl.meterIn}"`, col: C.green });
       pushT({ w: sl.divIn * scale, kind: "gap", col: "transparent" });
-      pushT({ w: sl.meterIn * scale, kind: "meter", label: "METER", sub: `${sl.meterIn}"`, col: C.green });
+      pushT({ w: sl.disconnectIn * scale, kind: "equip", label: ts.name || ts.category, sub: `${sl.disconnectIn}"`, col: C.amber, serviceSize: ts.serviceSize, showMeter: false });
       pushT({ w: sl.gapIn * scale, kind: "gap", col: "transparent" });
     }
   });
@@ -268,105 +270,174 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt }) {
   const chanW = tx;
   const totalDrawW = tapW + chanW;
 
-  // Layout Y — boxes on top, gutter aligned to bottom of tap can
-  const BOX_H = 50;
-  const BOX_Y = 10;                              // equipment boxes at top
-  const CONN_GAP = 8;                             // space between boxes and gutter
-  const CHAN_H = 14;
-  const CHAN_Y = BOX_Y + BOX_H + CONN_GAP;       // gutter below boxes
-  const TAP_H = 60;
-  const TAP_Y = CHAN_Y + CHAN_H - TAP_H;          // tap can bottom aligns with gutter bottom
-  const BOTTOM = Math.max(CHAN_Y + CHAN_H, TAP_Y + TAP_H); // whichever is lower
-  const DIM_Y = BOTTOM + 22;                      // dimension line well below everything
+  // Layout Y
+  const LBL_Y = 2;                                 // tenant name
+  const BOX_H = 46;                                // equipment box height
+  const TOP_Y = 16;                                // top row (stacked disconnect)
+  const BOX_GAP = 12;                              // gap between stacked boxes
+  const BOT_Y = TOP_Y + BOX_H + BOX_GAP;           // bottom row (meter/side-by-side disconnect)
+  const CONN_GAP = 8;
+  const CHAN_H = 30;                               // gutter
+  const CHAN_Y = BOT_Y + BOX_H + CONN_GAP;
+  const TAP_H = CHAN_Y + CHAN_H - TOP_Y;           // tap spans full height
+  const TAP_Y2 = TOP_Y;
+  const BOTTOM = CHAN_Y + CHAN_H;
+  const DIM_Y = BOTTOM + 22;
   const SVG_H = DIM_Y + 44;
 
   const TAP_X = PAD;
   const CHAN_X = TAP_X + tapW;
+  // Gutter length = total inches of all services (without tap can and initial gap)
+  const gutterIn = totalIn - TAP_CAN_IN - POST_TAP_GAP;
+  const gutterFt = (gutterIn / 12);
 
   return (
     <div style={{ overflowX: "auto", background: C.bg, borderRadius: 2, padding: "16px 8px" }}>
       <svg width={Math.max(W, PAD + totalDrawW + PAD)} height={SVG_H}
-           style={{ display: "block", fontFamily: "monospace", overflow: "visible" }}>
+        style={{ display: "block", fontFamily: "monospace", overflow: "visible" }}>
 
         {/* ── Tap Can box ── */}
-        <rect x={TAP_X} y={TAP_Y} width={tapW} height={TAP_H}
-              fill={C.purple} fillOpacity={0.15} stroke={C.purple} strokeWidth={2} rx={2} />
-        <text x={TAP_X + tapW / 2} y={TAP_Y + 24}
-              fill={C.purple} fontSize={9} fontWeight="bold" textAnchor="middle">TAP CAN</text>
-        <text x={TAP_X + tapW / 2} y={TAP_Y + 38}
-              fill={C.purple} fontSize={7} textAnchor="middle" opacity={0.8}>{TAP_CAN_IN}"</text>
+        <rect x={TAP_X} y={TAP_Y2} width={tapW} height={TAP_H}
+          fill={C.purple} fillOpacity={0.15} stroke={C.purple} strokeWidth={2} rx={2} />
+        <text x={TAP_X + tapW / 2} y={TAP_Y2 + TAP_H / 2 - 6}
+          fill={C.purple} fontSize={9} fontWeight="bold" textAnchor="middle">TAP CAN</text>
+        <text x={TAP_X + tapW / 2} y={TAP_Y2 + TAP_H / 2 + 8}
+          fill={C.purple} fontSize={7} textAnchor="middle" opacity={0.8}>{TAP_CAN_IN}"</text>
 
         {/* ── Connection: tap can → metering gutter ── */}
         <line x1={TAP_X + tapW} y1={CHAN_Y + CHAN_H / 2}
-              x2={CHAN_X} y2={CHAN_Y + CHAN_H / 2}
-              stroke={C.purple} strokeWidth={2} />
+          x2={CHAN_X} y2={CHAN_Y + CHAN_H / 2}
+          stroke={C.purple} strokeWidth={2} />
 
-        {/* ── Equipment boxes ABOVE the gutter ── */}
+        {/* ── Equipment segments ── */}
         {tenantSegs.map((seg, i) => {
           const sx = CHAN_X + seg.rx;
+          const cx = sx + seg.w / 2;
+
           if (seg.kind === "gap") {
+            const gapTop = TOP_Y;
+            const gapBot = CHAN_Y;
             return (
               <g key={i}>
-                <line x1={sx} y1={BOX_Y} x2={sx} y2={BOX_Y + BOX_H}
-                      stroke={C.border} strokeWidth={1} strokeDasharray="3 2" />
+                <line x1={sx} y1={gapTop} x2={sx} y2={gapBot}
+                  stroke={C.border} strokeWidth={1} strokeDasharray="3 2" />
                 {seg.w > 10 && (
-                  <text x={sx + seg.w / 2} y={BOX_Y + BOX_H / 2 + 4}
-                        fill={C.muted} fontSize={7} textAnchor="middle">6"</text>
+                  <text x={cx} y={(gapTop + gapBot) / 2 + 3}
+                    fill={C.muted} fontSize={7} textAnchor="middle">6"</text>
                 )}
               </g>
             );
           }
+
           const isSmall = seg.w < 28;
-          return (
-            <g key={i}>
-              {/* connector from box DOWN to gutter */}
-              <line x1={sx + seg.w / 2} y1={BOX_Y + BOX_H} x2={sx + seg.w / 2} y2={CHAN_Y}
+
+          if (seg.kind === "equip") {
+            const circR = Math.min(seg.w / 3, 14);
+            const discTop = seg.showMeter ? TOP_Y : BOT_Y;
+            const meterTop = BOT_Y;
+
+            return (
+              <g key={i}>
+                {/* ── Tenant name above everything ── */}
+                {!isSmall && (
+                  <text x={cx} y={LBL_Y + 8}
+                    fill={C.text} fontSize={Math.min(seg.w / 6, 8)} fontWeight="bold" textAnchor="middle">{seg.label}</text>
+                )}
+
+                {/* ── DISCONNECT SWITCH box ── */}
+                <rect x={sx + 1} y={discTop} width={seg.w - 2} height={BOX_H}
+                  fill={seg.col} fillOpacity={0.15} stroke={seg.col} strokeWidth={1.5} rx={1} />
+                {/* Handle: straight vertical line extending down from center */}
+                <line x1={cx} y1={discTop + BOX_H} x2={cx} y2={discTop + BOX_H + 8}
+                  stroke={seg.col} strokeWidth={2} strokeLinecap="round" />
+                {!isSmall && (
+                  <text x={cx} y={discTop + BOX_H / 2 + 3}
+                    fill={seg.col} fontSize={5} fontWeight="bold" textAnchor="middle" letterSpacing={0.3}>DISCONNECT SW.</text>
+                )}
+
+                {/* ── METER box (only for stacked / showMeter) ── */}
+                {seg.showMeter && (<>
+                  <rect x={sx + 1} y={meterTop} width={seg.w - 2} height={BOX_H}
+                    fill={C.green} fillOpacity={0.08} stroke={C.green} strokeWidth={1.5} rx={1} />
+                  <circle cx={cx} cy={meterTop + BOX_H * 0.42} r={circR}
+                    fill="none" stroke={C.green} strokeWidth={1.5} />
+                  <circle cx={cx} cy={meterTop + BOX_H * 0.42} r={2}
+                    fill={C.green} fillOpacity={0.6} />
+                  {!isSmall && (
+                    <text x={cx} y={meterTop + BOX_H - 3}
+                      fill={C.green} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={1}>METER</text>
+                  )}
+                  {/* Connector: meter → gutter */}
+                  <line x1={cx} y1={meterTop + BOX_H} x2={cx} y2={CHAN_Y}
+                    stroke={C.green} strokeWidth={1} strokeOpacity={0.4} />
+
+                  {/* Connector: disconnect → meter (connector line under handle) */}
+                  <line x1={cx} y1={discTop + BOX_H + 8} x2={cx} y2={meterTop}
+                    stroke={C.muted} strokeWidth={1} strokeOpacity={0.5} />
+                </>)}
+
+                {/* ── Connector: disconnect → gutter (only if no meter below it) ── */}
+                {!seg.showMeter && (
+                  <line x1={cx} y1={discTop + BOX_H + 8} x2={cx} y2={CHAN_Y}
                     stroke={seg.col} strokeWidth={1} strokeOpacity={0.4} />
-              {/* equipment box */}
-              <rect x={sx + 1} y={BOX_Y} width={seg.w - 2} height={BOX_H}
-                    fill={seg.col} fillOpacity={0.12} stroke={seg.col} strokeWidth={1.5} rx={1} />
-              {!isSmall && (
-                <>
-                  <text x={sx + seg.w / 2} y={BOX_Y + 16}
-                        fill={seg.col} fontSize={Math.min(seg.w / 7, 9)} fontWeight="bold"
-                        textAnchor="middle">{seg.label}</text>
-                  <text x={sx + seg.w / 2} y={BOX_Y + 30}
-                        fill={seg.col} fontSize={7} textAnchor="middle" opacity={0.8}>{seg.sub}</text>
-                </>
-              )}
-              {isSmall && (
-                <text x={sx + seg.w / 2} y={BOX_Y + BOX_H / 2 + 3}
-                      fill={seg.col} fontSize={6} textAnchor="middle">{seg.w.toFixed(0)}</text>
-              )}
-            </g>
-          );
+                )}
+              </g>
+            );
+          }
+
+          if (seg.kind === "meter-only") {
+            // Standalone meter (for side-by-side layouts) — aligned with disconnect row
+            const circR = Math.min(seg.w / 3, 14);
+            return (
+              <g key={i}>
+                <rect x={sx + 1} y={BOT_Y} width={seg.w - 2} height={BOX_H}
+                  fill={C.green} fillOpacity={0.08} stroke={C.green} strokeWidth={1.5} rx={1} />
+                <circle cx={cx} cy={BOT_Y + BOX_H * 0.42} r={circR}
+                  fill="none" stroke={C.green} strokeWidth={1.5} />
+                <circle cx={cx} cy={BOT_Y + BOX_H * 0.42} r={2}
+                  fill={C.green} fillOpacity={0.6} />
+                {!isSmall && (
+                  <text x={cx} y={BOT_Y + BOX_H - 3}
+                    fill={C.green} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={1}>METER</text>
+                )}
+                <line x1={cx} y1={BOT_Y + BOX_H} x2={cx} y2={CHAN_Y}
+                  stroke={C.green} strokeWidth={1} strokeOpacity={0.4} />
+              </g>
+            );
+          }
+
+          return null;
         })}
 
-        {/* ── Metering Gutter (aligned to bottom of tap can) ── */}
+        {/* ── Metering Gutter (with gutter length) ── */}
         {chanW > 0 && (
           <>
             <rect x={CHAN_X} y={CHAN_Y} width={chanW} height={CHAN_H}
-                  fill={C.raised} stroke={C.border} strokeWidth={1.5} rx={1} />
-            <text x={CHAN_X + chanW / 2} y={CHAN_Y + 10}
-                  fill={C.muted} fontSize={7} textAnchor="middle" letterSpacing={2}>
+              fill={C.raised} stroke={C.border} strokeWidth={1.5} rx={1} />
+            <text x={CHAN_X + chanW / 2} y={CHAN_Y + 11}
+              fill={C.muted} fontSize={7} textAnchor="middle" letterSpacing={2}>
               METERING GUTTER
+            </text>
+            <text x={CHAN_X + chanW / 2} y={CHAN_Y + 24}
+              fill={C.amber} fontSize={8} fontWeight="bold" textAnchor="middle">
+              {gutterIn}" = {gutterFt.toFixed(2)} ft
             </text>
           </>
         )}
 
-        {/* ── Dimension line (below everything) ── */}
+        {/* ── Dimension line ── */}
         <line x1={PAD} y1={DIM_Y} x2={PAD + totalDrawW} y2={DIM_Y}
-              stroke={ok ? C.green : C.red} strokeWidth={1.5} />
+          stroke={ok ? C.green : C.red} strokeWidth={1.5} />
         <polygon points={`${PAD},${DIM_Y - 4} ${PAD},${DIM_Y + 4} ${PAD - 5},${DIM_Y}`}
-                 fill={ok ? C.green : C.red} />
+          fill={ok ? C.green : C.red} />
         <polygon points={`${PAD + totalDrawW},${DIM_Y - 4} ${PAD + totalDrawW},${DIM_Y + 4} ${PAD + totalDrawW + 5},${DIM_Y}`}
-                 fill={ok ? C.green : C.red} />
+          fill={ok ? C.green : C.red} />
         <line x1={PAD} y1={DIM_Y - 8} x2={PAD} y2={DIM_Y + 8}
-              stroke={ok ? C.green : C.red} strokeWidth={1} />
+          stroke={ok ? C.green : C.red} strokeWidth={1} />
         <line x1={PAD + totalDrawW} y1={DIM_Y - 8} x2={PAD + totalDrawW} y2={DIM_Y + 8}
-              stroke={ok ? C.green : C.red} strokeWidth={1} />
+          stroke={ok ? C.green : C.red} strokeWidth={1} />
         <text x={PAD + totalDrawW / 2} y={DIM_Y + 16}
-              fill={ok ? C.green : C.red} fontSize={10} textAnchor="middle" fontWeight="bold">
+          fill={ok ? C.green : C.red} fontSize={10} textAnchor="middle" fontWeight="bold">
           {totalIn}" = {totalFt.toFixed(3)} ft
           {availFt > 0 ? (ok ? `  ✓ OK (${availFt} ft avail.)` : `  ✗ EXCEEDS ${availFt} ft`) : ""}
         </text>
@@ -374,9 +445,9 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt }) {
         {/* ── Legend ── */}
         {[
           { col: C.purple, lbl: "Tap Can" },
-          { col: C.blue, lbl: "Stacked ≤200A" },
-          { col: C.amber, lbl: "Disconnect 400–600A" },
           { col: C.green, lbl: "Meter" },
+          { col: C.blue, lbl: "Disc. Switch ≤200A" },
+          { col: C.amber, lbl: "Disc. Switch 400–800A" },
         ].map((l, i) => (
           <g key={i} transform={`translate(${PAD + i * 140}, ${SVG_H - 14})`}>
             <rect width={8} height={8} fill={l.col} opacity={0.8} rx={1} />
@@ -458,15 +529,12 @@ function SettingsPanel({ voltage, setVoltage, hpVoltage, setHpVoltage, categorie
     setNewCatName(""); setAddingCat(false);
   };
 
-  const VPreset = ({ v, setV }) => (
-    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+  const VButtons = ({ v, setV }) => (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       {VOLTAGE_PRESETS.map((p) => (
         <button key={p.label} style={S.btn(v.label === p.label ? C.amber : C.raised, v.label === p.label ? C.bg : C.muted)}
           onClick={() => setV(p)}>{p.label}</button>
       ))}
-      <span style={{ color: C.muted, fontSize: 10, alignSelf: "center" }}>or edit factor:</span>
-      <input style={{ ...S.inp, width: 80 }} type="number" step="0.001" value={v.factor}
-        onChange={(e) => setV({ label: "Custom", factor: Number(e.target.value) })} />
     </div>
   );
 
@@ -477,39 +545,34 @@ function SettingsPanel({ voltage, setVoltage, hpVoltage, setHpVoltage, categorie
         <div style={S.cardH} data-r-cardh>
           <span>VOLTAGE SYSTEM</span>
           <button style={editBtn(editVolt)} onClick={() => setEditVolt((e) => !e)}>
-            {editVolt ? "✓ SAVE" : "✎ EDIT"}
+            {editVolt ? "✓ SAVE" : "✎ EDIT FACTORS"}
           </button>
         </div>
 
-        {editVolt ? (
-          <div style={S.rg2(bp.mobile)}>
-            <div>
-              <label style={S.lbl}>Tenant Voltage → Amps = KVA ÷ factor</label>
-              <VPreset v={voltage} setV={setVoltage} />
-            </div>
-            <div>
-              <label style={S.lbl}>House Panel Voltage → Amps = KVA ÷ factor</label>
-              <VPreset v={hpVoltage} setV={setHpVoltage} />
-            </div>
-          </div>
-        ) : (
-          <div style={S.rg2(bp.mobile)}>
-            <div>
-              <label style={S.lbl}>Tenant Voltage</label>
-              <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-                <span style={readVal}>{voltage.label}</span>
-                <span style={readMuted}>factor: {voltage.factor}</span>
-              </div>
-            </div>
-            <div>
-              <label style={S.lbl}>House Panel Voltage</label>
-              <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
-                <span style={readVal}>{hpVoltage.label}</span>
-                <span style={readMuted}>factor: {hpVoltage.factor}</span>
-              </div>
+        <div style={S.rg2(bp.mobile)}>
+          <div>
+            <label style={S.lbl}>Tenant Voltage</label>
+            <VButtons v={voltage} setV={setVoltage} />
+            <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={readMuted}>factor:</span>
+              {editVolt
+                ? <input style={{ ...S.inp, width: 80 }} type="number" step="0.001" value={voltage.factor}
+                  onChange={(e) => setVoltage({ label: "Custom", factor: Number(e.target.value) })} />
+                : <span style={readVal}>{voltage.factor}</span>}
             </div>
           </div>
-        )}
+          <div>
+            <label style={S.lbl}>House Panel Voltage</label>
+            <VButtons v={hpVoltage} setV={setHpVoltage} />
+            <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={readMuted}>factor:</span>
+              {editVolt
+                ? <input style={{ ...S.inp, width: 80 }} type="number" step="0.001" value={hpVoltage.factor}
+                  onChange={(e) => setHpVoltage({ label: "Custom", factor: Number(e.target.value) })} />
+                : <span style={readVal}>{hpVoltage.factor}</span>}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── Categories ── */}
@@ -523,33 +586,33 @@ function SettingsPanel({ voltage, setVoltage, hpVoltage, setHpVoltage, categorie
 
         {editCats ? (
           <div style={{ overflowX: "auto" }} data-r-tblwrap>
-          <table style={S.tbl}>
-            <thead>
-              <tr>{["Name", "W / ft²", "House Panel (fixed KVA)", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {categories.map((cat) => (
-                <CatRow key={cat.id} cat={cat} tenants={tenants} confirmDel={confirmDel}
-                  setConfirmDel={setConfirmDel} updateCategory={updateCategory}
-                  setCategories={setCategories} setTenants={setTenants} doDeleteCat={doDeleteCat} />
-              ))}
-              {addingCat ? (
-                <tr><td style={S.td} colSpan={4}>
-                  <div style={S.row}>
-                    <input style={{ ...S.inp, width: 200 }} value={newCatName} autoFocus placeholder="Category name"
-                      onChange={(e) => setNewCatName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") submitNewCat(); if (e.key === "Escape") setAddingCat(false); }} />
-                    <button style={S.btn()} onClick={submitNewCat}>Add</button>
-                    <button style={S.ghost} onClick={() => { setAddingCat(false); setNewCatName(""); }}>Cancel</button>
-                  </div>
-                </td></tr>
-              ) : (
-                <tr><td colSpan={4} style={S.td}>
-                  <button style={S.ghost} onClick={() => setAddingCat(true)}>+ New Category</button>
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+            <table style={S.tbl}>
+              <thead>
+                <tr>{["Name", "W / ft²", "House Panel (fixed KVA)", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {categories.map((cat) => (
+                  <CatRow key={cat.id} cat={cat} tenants={tenants} confirmDel={confirmDel}
+                    setConfirmDel={setConfirmDel} updateCategory={updateCategory}
+                    setCategories={setCategories} setTenants={setTenants} doDeleteCat={doDeleteCat} />
+                ))}
+                {addingCat ? (
+                  <tr><td style={S.td} colSpan={4}>
+                    <div style={S.row}>
+                      <input style={{ ...S.inp, width: 200 }} value={newCatName} autoFocus placeholder="Category name"
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") submitNewCat(); if (e.key === "Escape") setAddingCat(false); }} />
+                      <button style={S.btn()} onClick={submitNewCat}>Add</button>
+                      <button style={S.ghost} onClick={() => { setAddingCat(false); setNewCatName(""); }}>Cancel</button>
+                    </div>
+                  </td></tr>
+                ) : (
+                  <tr><td colSpan={4} style={S.td}>
+                    <button style={S.ghost} onClick={() => setAddingCat(true)}>+ New Category</button>
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
@@ -601,7 +664,7 @@ function CatRow({ cat, tenants, confirmDel, setConfirmDel, updateCategory, setCa
           {tenants.some((t) => t.category === cat.name)
             ? <span style={{ color: C.muted, fontSize: 9 }}>in use</span>
             : <button style={{ ...S.ghost, color: C.red, borderColor: "#450a0a" }}
-                onClick={() => setConfirmDel({ id: cat.id, name: cat.name })}>✕ Delete</button>}
+              onClick={() => setConfirmDel({ id: cat.id, name: cat.name })}>✕ Delete</button>}
         </td>
       </tr>
       {confirmDel?.id === cat.id && (
@@ -632,17 +695,24 @@ function TenantRow({ t, computed, catMap, categories, updateTenant, removeTenant
       <td style={S.td}>
         {cat.isHousePanel ? <span style={{ color: C.muted }}>—</span>
           : <input style={{ ...S.inp, width: 80 }} type="number" value={t.sqft}
-              onChange={(e) => updateTenant(t.id, "sqft", e.target.value)} placeholder="sqft" />}
+            onChange={(e) => updateTenant(t.id, "sqft", e.target.value)} placeholder="sqft" />}
       </td>
       <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>{cat.isHousePanel ? "—" : cat.wattsPerSqft}</td>
       <td style={S.td}>
         {cat.isHousePanel
           ? <input style={{ ...S.inp, width: 68 }} type="number" value={t.fixedKVA}
-              onChange={(e) => updateTenant(t.id, "fixedKVA", e.target.value)} placeholder="KVA" />
+            onChange={(e) => updateTenant(t.id, "fixedKVA", e.target.value)} placeholder="KVA" />
           : <strong style={{ color: C.amber }}>{co.kva?.toFixed(2) || "—"}</strong>}
       </td>
       <td style={{ ...S.td, color: C.blue }}>{co.amps?.toFixed(2) || "—"}</td>
-      <td style={S.td}><span style={S.pill()}>{co.serviceSize || "—"}A</span></td>
+      <td style={S.td}>
+        <select style={{ ...S.sel, width: 110, color: t.serviceOverride ? C.amber : C.green, fontWeight: "bold", fontSize: 11 }}
+          value={t.serviceOverride || ""}
+          onChange={(e) => updateTenant(t.id, "serviceOverride", e.target.value)}>
+          <option value="">Auto ({co.autoServiceSize || "—"}A)</option>
+          {SELECTABLE_SIZES.map((sz) => <option key={sz} value={sz}>{sz}A</option>)}
+        </select>
+      </td>
       <td style={S.td}>{co.slot && <span style={slotPill(co.slot)}>{co.slot.totalIn}"</span>}</td>
       <td style={S.td} data-print-hide>
         <button style={{ ...S.ghost, color: C.red, borderColor: "#450a0a" }} onClick={() => removeTenant(t.id)}>✕</button>
@@ -668,74 +738,74 @@ function WirewayRulesCard({ wirewayRules, setWirewayRules }) {
       </div>
 
       <div style={{ overflowX: "auto" }} data-r-tblwrap>
-      <table style={S.tbl}>
-        <thead>
-          <tr>
-            {["Service Size", "Type", "Disconnect", "Divider", "Meter", "Next Gap", "TOTAL"].map((h) => (
-              <th key={h} style={S.th}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {wirewayRules.map((r) => {
-            const total = calcSlotTotal(r);
-            return (
-              <tr key={r.id}>
-                <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{r.label}</td>
-                {editing ? (
-                  <>
-                    <td style={S.td}>
-                      <select style={{ ...S.sel, width: 140 }} value={r.type}
-                        onChange={(e) => updateRule(r.id, "type", e.target.value)}>
-                        {WIREWAY_TYPES.map((wt) => <option key={wt} value={wt}>{wt}</option>)}
-                      </select>
-                    </td>
-                    <td style={S.td}>
-                      <input style={{ ...S.inp, width: 50 }} type="number" value={r.disconnectIn}
-                        onChange={(e) => updateRule(r.id, "disconnectIn", Number(e.target.value))} />
-                    </td>
-                    <td style={S.td}>
-                      {r.type === "Stacked"
-                        ? <span style={readMuted}>—</span>
-                        : <input style={{ ...S.inp, width: 50 }} type="number" value={r.divIn}
+        <table style={S.tbl}>
+          <thead>
+            <tr>
+              {["Service Size", "Type", "Disconnect", "Divider", "Meter", "Next Gap", "TOTAL"].map((h) => (
+                <th key={h} style={S.th}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {wirewayRules.map((r) => {
+              const total = calcSlotTotal(r);
+              return (
+                <tr key={r.id}>
+                  <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{r.label}</td>
+                  {editing ? (
+                    <>
+                      <td style={S.td}>
+                        <select style={{ ...S.sel, width: 140 }} value={r.type}
+                          onChange={(e) => updateRule(r.id, "type", e.target.value)}>
+                          {WIREWAY_TYPES.map((wt) => <option key={wt} value={wt}>{wt}</option>)}
+                        </select>
+                      </td>
+                      <td style={S.td}>
+                        <input style={{ ...S.inp, width: 50 }} type="number" value={r.disconnectIn}
+                          onChange={(e) => updateRule(r.id, "disconnectIn", Number(e.target.value))} />
+                      </td>
+                      <td style={S.td}>
+                        {r.type === "Stacked"
+                          ? <span style={readMuted}>—</span>
+                          : <input style={{ ...S.inp, width: 50 }} type="number" value={r.divIn}
                             onChange={(e) => updateRule(r.id, "divIn", Number(e.target.value))} />}
-                    </td>
-                    <td style={S.td}>
-                      {r.type === "Stacked"
-                        ? <span style={readMuted}>stacked</span>
-                        : <input style={{ ...S.inp, width: 50 }} type="number" value={r.meterIn}
+                      </td>
+                      <td style={S.td}>
+                        {r.type === "Stacked"
+                          ? <span style={readMuted}>stacked</span>
+                          : <input style={{ ...S.inp, width: 50 }} type="number" value={r.meterIn}
                             onChange={(e) => updateRule(r.id, "meterIn", Number(e.target.value))} />}
-                    </td>
-                    <td style={S.td}>
-                      <input style={{ ...S.inp, width: 50 }} type="number" value={r.gapIn}
-                        onChange={(e) => updateRule(r.id, "gapIn", Number(e.target.value))} />
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td style={{ ...S.td, color: C.muted }}>{r.type}</td>
-                    <td style={{ ...S.td, color: C.blue }}>{r.disconnectIn}"</td>
-                    <td style={{ ...S.td, color: C.muted }}>{r.type === "Stacked" ? "—" : r.divIn + '"'}</td>
-                    <td style={{ ...S.td, color: C.green }}>{r.type === "Stacked" ? "stacked" : r.meterIn + '"'}</td>
-                    <td style={{ ...S.td, color: C.muted }}>{r.gapIn}"</td>
-                  </>
-                )}
-                <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{total}"</td>
-              </tr>
-            );
-          })}
-          {/* Tap Can row — always read-only */}
-          <tr>
-            <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>Tap Can</td>
-            <td style={{ ...S.td, color: C.muted }}>Fixed at start</td>
-            <td style={{ ...S.td, color: C.muted }}>—</td>
-            <td style={{ ...S.td, color: C.muted }}>—</td>
-            <td style={{ ...S.td, color: C.muted }}>—</td>
-            <td style={{ ...S.td, color: C.muted }}>—</td>
-            <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{TAP_CAN_IN}"</td>
-          </tr>
-        </tbody>
-      </table>
+                      </td>
+                      <td style={S.td}>
+                        <input style={{ ...S.inp, width: 50 }} type="number" value={r.gapIn}
+                          onChange={(e) => updateRule(r.id, "gapIn", Number(e.target.value))} />
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ ...S.td, color: C.muted }}>{r.type}</td>
+                      <td style={{ ...S.td, color: C.blue }}>{r.disconnectIn}"</td>
+                      <td style={{ ...S.td, color: C.muted }}>{r.type === "Stacked" ? "—" : r.divIn + '"'}</td>
+                      <td style={{ ...S.td, color: C.green }}>{r.type === "Stacked" ? "stacked" : r.meterIn + '"'}</td>
+                      <td style={{ ...S.td, color: C.muted }}>{r.gapIn}"</td>
+                    </>
+                  )}
+                  <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{total}"</td>
+                </tr>
+              );
+            })}
+            {/* Tap Can row — always read-only */}
+            <tr>
+              <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>Tap Can</td>
+              <td style={{ ...S.td, color: C.muted }}>Fixed at start</td>
+              <td style={{ ...S.td, color: C.muted }}>—</td>
+              <td style={{ ...S.td, color: C.muted }}>—</td>
+              <td style={{ ...S.td, color: C.muted }}>—</td>
+              <td style={{ ...S.td, color: C.muted }}>—</td>
+              <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{TAP_CAN_IN}"</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -771,8 +841,9 @@ export default function App() {
       const factor = isHP ? hpVoltage.factor : voltage.factor;
       const kva = isHP && t.fixedKVA !== "" ? Number(t.fixedKVA) : calcKVA(t.sqft, cat.wattsPerSqft);
       const amps = calcAmps(kva, factor);
-      const svcSz = getServiceSize(amps);
-      return { ...t, isHP, factor, kva, amps, serviceSize: svcSz, slot: getSlot(svcSz, wirewayRules) };
+      const autoSvcSz = getServiceSize(amps);
+      const svcSz = t.serviceOverride ? Number(t.serviceOverride) : autoSvcSz;
+      return { ...t, isHP, factor, kva, amps, autoServiceSize: autoSvcSz, serviceSize: svcSz, slot: getSlot(svcSz, wirewayRules) };
     }), [tenants, catMap, voltage.factor, hpVoltage.factor, wirewayRules]);
 
   const totalKVA = computed.reduce((s, t) => s + t.kva, 0);
@@ -781,9 +852,11 @@ export default function App() {
   const catSummary = useMemo(() =>
     categories.map((cat) => {
       const rows = computed.filter((t) => t.category === cat.name);
-      return { name: cat.name, isHP: cat.isHousePanel,
+      return {
+        name: cat.name, isHP: cat.isHousePanel,
         totalSqft: rows.reduce((s, t) => s + (Number(t.sqft) || 0), 0),
-        totalKVA: rows.reduce((s, t) => s + t.kva, 0) };
+        totalKVA: rows.reduce((s, t) => s + t.kva, 0)
+      };
     }).filter((c) => c.totalKVA > 0 || c.totalSqft > 0), [categories, computed]);
 
   const allBuildings = useMemo(() =>
@@ -802,8 +875,10 @@ export default function App() {
     const totalIn = TAP_CAN_IN + POST_TAP_GAP + tenantsIn;
     const totalFt = totalIn / 12;
     const availFt = Number(wireway.availableWallFeet) || 0;
-    return { tenantSlots: slots, tenantsIn, totalIn, totalFt, availFt,
-      ok: availFt > 0 && totalFt <= availFt };
+    return {
+      tenantSlots: slots, tenantsIn, totalIn, totalFt, availFt,
+      ok: availFt > 0 && totalFt <= availFt
+    };
   }, [computed, wireway]);
 
   // ── Download helper (works in sandboxed iframes) ──
@@ -820,11 +895,13 @@ export default function App() {
   }, []);
 
   const handleSave = useCallback(() => {
-    const data = { project, voltage, hpVoltage,
+    const data = {
+      project, voltage, hpVoltage,
       categories: categories.map(({ id, ...r }) => r),
       tenants: tenants.map(({ id, ...r }) => r),
       wireway, wirewayRules: wirewayRules.map(({ id, ...r }) => r),
-      savedAt: new Date().toISOString() };
+      savedAt: new Date().toISOString()
+    };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     triggerDownload(blob, `${project.name || "estimate"}_${project.number || "v1"}.json`);
   }, [project, voltage, hpVoltage, categories, tenants, wireway, wirewayRules, triggerDownload]);
@@ -839,8 +916,8 @@ export default function App() {
       [],
       ["Building", "Tenant", "Category", "S.F.", "W/sqft", "KVA", "Amps", "Service Size", "Wireway Type", "Wireway (in)"],
       ...computed.map((t) => [t.building, t.name, t.category, t.isHP ? "—" : (t.sqft || 0),
-        t.isHP ? "fixed" : (catMap[t.category]?.wattsPerSqft || 0),
-        +t.kva.toFixed(2), +t.amps.toFixed(4), t.serviceSize, t.slot.type, t.slot.totalIn]),
+      t.isHP ? "fixed" : (catMap[t.category]?.wattsPerSqft || 0),
+      +t.kva.toFixed(2), +t.amps.toFixed(4), t.serviceSize, t.slot.type, t.slot.totalIn]),
       [],
       ["SUMMARY BY CATEGORY"], ["Category", "Total S.F.", "KVA"],
       ...catSummary.map((c) => [c.name + " S.F.:", c.isHP ? "—" : c.totalSqft, +c.totalKVA.toFixed(2)]),
@@ -850,9 +927,9 @@ export default function App() {
       ...allBuildings.flatMap((b) => {
         const bw = buildingWireway(b);
         return [[`Building ${b}`], ["Tap Can", TAP_CAN_IN + '"'], ["Gap (tap→disc)", POST_TAP_GAP + '"'],
-          ...bw.tenantSlots.map((t) => [t.name || t.category, t.serviceSize + "A", t.slot.type, t.slot.totalIn + '"']),
-          ["Total (in)", bw.totalIn, "Total (ft)", +bw.totalFt.toFixed(4)],
-          ["Available (ft)", bw.availFt, "Status", bw.ok ? "OK" : "EXCEEDS"], []];
+        ...bw.tenantSlots.map((t) => [t.name || t.category, t.serviceSize + "A", t.slot.type, t.slot.totalIn + '"']),
+        ["Total (in)", bw.totalIn, "Total (ft)", +bw.totalFt.toFixed(4)],
+        ["Available (ft)", bw.availFt, "Status", bw.ok ? "OK" : "EXCEEDS"], []];
       }),
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Estimate");
@@ -919,13 +996,19 @@ export default function App() {
 
       // Build summary content
       let html = '<div class="stat-row">';
-      [{v: project.name || "—", l: "Project"},
-       {v: totalKVA.toFixed(2) + " KVA", l: "Total KVA"},
-       {v: totalAmps.toFixed(2) + " A", l: "Total Amps ÷ " + voltage.factor},
-       {v: project.buildings, l: "Buildings"}
+      [{ v: project.name || "—", l: "Project" },
+      { v: totalKVA.toFixed(2) + " KVA", l: "Total KVA" },
+      { v: totalAmps.toFixed(2) + " A", l: "Total Amps ÷ " + voltage.factor },
+      { v: project.buildings, l: "Buildings" }
       ].forEach(s => {
         html += '<div class="stat"><div class="stat-val">' + s.v + '</div><div class="stat-lbl">' + s.l + '</div></div>';
       });
+      html += '</div>';
+
+      // Voltage system info
+      html += '<div class="stat-row">';
+      html += '<div class="stat"><div class="stat-lbl">TENANT VOLTAGE</div><div class="stat-val" style="font-size:14px">' + voltage.label + '</div></div>';
+      html += '<div class="stat"><div class="stat-lbl">HOUSE PANEL VOLTAGE</div><div class="stat-val" style="font-size:14px">' + hpVoltage.label + '</div></div>';
       html += '</div>';
 
       // Building tables
@@ -934,7 +1017,7 @@ export default function App() {
         const bw = buildingWireway(b);
         html += '<h3>BUILDING ' + b + '</h3>';
         html += '<table><thead><tr>';
-        ["Tenant","Category","S.F.","W/ft²","KVA","Amps","Service","Wireway"].forEach(h => { html += '<th>' + h + '</th>'; });
+        ["Tenant", "Category", "S.F.", "W/ft²", "KVA", "Amps", "Service", "Wireway"].forEach(h => { html += '<th>' + h + '</th>'; });
         html += '</tr></thead><tbody>';
         bComp.forEach(t => {
           html += '<tr>';
@@ -949,8 +1032,8 @@ export default function App() {
           html += '</tr>';
         });
         html += '<tr style="background:#f5f5f5"><td colspan="4" class="muted" style="font-size:8px;letter-spacing:2px">SUBTOTAL B' + b + '</td>';
-        html += '<td class="bold">' + bComp.reduce((s,t) => s + t.kva, 0).toFixed(2) + '</td>';
-        html += '<td class="bold">' + bComp.reduce((s,t) => s + t.amps, 0).toFixed(4) + '</td>';
+        html += '<td class="bold">' + bComp.reduce((s, t) => s + t.kva, 0).toFixed(2) + '</td>';
+        html += '<td class="bold">' + bComp.reduce((s, t) => s + t.amps, 0).toFixed(4) + '</td>';
         html += '<td></td>';
         html += '<td class="bold">' + bw.totalIn + '" = ' + bw.totalFt.toFixed(2) + ' ft ' + (bw.availFt > 0 ? (bw.ok ? '✓' : '✗') : '') + '</td>';
         html += '</tr></tbody></table>';
@@ -962,7 +1045,7 @@ export default function App() {
         html += '<tr><td>' + c.name + ' S.F.:</td><td>' + (c.isHP ? '—' : c.totalSqft.toLocaleString()) + '</td><td class="bold">' + c.totalKVA.toFixed(2) + '</td></tr>';
       });
       html += '<tr style="background:#f5f5f5;border-top:2px solid #ccc"><td class="muted" style="font-size:8px;letter-spacing:2px">TOTAL KVA</td><td></td><td class="bold" style="font-size:14px">' + totalKVA.toFixed(2) + '</td></tr>';
-      html += '<tr style="background:#f5f5f5"><td class="muted" style="font-size:8px;letter-spacing:2px">TOTAL AMPS</td><td class="muted">' + totalKVA.toFixed(2) + ' ÷ ' + voltage.factor + '</td><td class="bold" style="font-size:14px">' + totalAmps.toFixed(6) + '</td></tr>';
+      html += '<tr style="background:#f5f5f5"><td class="muted" style="font-size:8px;letter-spacing:2px">TOTAL AMPS</td><td></td><td class="bold" style="font-size:14px">' + totalAmps.toFixed(2) + '</td></tr>';
       html += '</tbody></table>';
 
       // Wireway diagrams - grab SVGs from DOM
@@ -987,7 +1070,7 @@ export default function App() {
 
       document.body.removeChild(printRoot);
     }, 100);
-  }, [project, voltage, totalKVA, totalAmps, allBuildings, computed, buildingWireway, catMap, catSummary]);
+  }, [project, voltage, hpVoltage, totalKVA, totalAmps, allBuildings, computed, buildingWireway, catMap, catSummary]);
 
   const updateTenant = useCallback((id, f, v) => setTenants((p) => p.map((t) => (t.id === id ? { ...t, [f]: v } : t))), []);
   const removeTenant = useCallback((id) => setTenants((p) => p.filter((t) => t.id !== id)), []);
@@ -1151,55 +1234,58 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ overflowX: "auto" }} data-r-tblwrap>
-                <table style={{ ...S.tbl, marginBottom: 16 }}>
-                  <thead><tr>{["Element", "Service", "Type", "Calculation", "Inches"].map((h) => (
-                    <th key={h} style={S.th}>{h}</th>
-                  ))}</tr></thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ ...S.td, color: C.purple, fontWeight: "bold" }}>Tap Can</td>
-                      <td style={S.td}>—</td><td style={S.td}>—</td>
-                      <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>Fixed at start</td>
-                      <td style={{ ...S.td, color: C.purple, fontWeight: "bold" }}>30"</td>
-                    </tr>
-                    <tr>
-                      <td style={{ ...S.td, color: C.muted }}>Gap</td>
-                      <td style={S.td}>—</td><td style={S.td}>—</td>
-                      <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>Tap can → first disconnect</td>
-                      <td style={{ ...S.td, color: C.muted, fontWeight: "bold" }}>{POST_TAP_GAP}"</td>
-                    </tr>
-                    {bw.tenantSlots.map((t, i) => {
-                      const sl = t.slot;
-                      const formula = sl.type === "Stacked"
-                        ? `${sl.disconnectIn}" (stacked) + ${sl.gapIn}" gap`
-                        : `${sl.disconnectIn}" disc + ${sl.divIn}" + ${sl.meterIn}" meter + ${sl.gapIn}" gap`;
-                      return (
-                        <tr key={i}>
-                          <td style={S.td}>{t.name || <em style={{ color: C.muted }}>(unnamed)</em>}</td>
-                          <td style={S.td}><span style={S.pill()}>{t.serviceSize}A</span></td>
-                          <td style={S.td}><span style={slotPill(sl)}>{sl.type}</span></td>
-                          <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>{formula}</td>
-                          <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{sl.totalIn}"</td>
-                        </tr>
-                      );
-                    })}
-                    <tr style={{ background: C.raised, borderTop: `2px solid ${C.border}` }}>
-                      <td colSpan={3} style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL WALL SPACE NEEDED</td>
-                      <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>30" (tap) + {POST_TAP_GAP}" (gap) + {bw.tenantsIn}" (tenants)</td>
-                      <td style={{ ...S.td, fontWeight: "bold", fontSize: 13,
-                        color: bw.availFt > 0 ? (bw.ok ? C.green : C.red) : C.amber }}>{bw.totalIn}" = {bw.totalFt.toFixed(3)} ft</td>
-                    </tr>
-                    {bw.availFt > 0 && (
-                      <tr style={{ background: C.raised }}>
-                        <td colSpan={4} style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL AVAILABLE WALL SPACE</td>
-                        <td style={{ ...S.td, color: C.muted, fontWeight: "bold" }}>{bw.availFt} ft</td>
+                  <table style={{ ...S.tbl, marginBottom: 16 }}>
+                    <thead><tr>{["Element", "Service", "Type", "Calculation", "Inches"].map((h) => (
+                      <th key={h} style={S.th}>{h}</th>
+                    ))}</tr></thead>
+                    <tbody>
+                      <tr>
+                        <td style={{ ...S.td, color: C.purple, fontWeight: "bold" }}>Tap Can</td>
+                        <td style={S.td}>—</td><td style={S.td}>—</td>
+                        <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>Fixed at start</td>
+                        <td style={{ ...S.td, color: C.purple, fontWeight: "bold" }}>30"</td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                      <tr>
+                        <td style={{ ...S.td, color: C.muted }}>Gap</td>
+                        <td style={S.td}>—</td><td style={S.td}>—</td>
+                        <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>Tap can → first disconnect</td>
+                        <td style={{ ...S.td, color: C.muted, fontWeight: "bold" }}>{POST_TAP_GAP}"</td>
+                      </tr>
+                      {bw.tenantSlots.map((t, i) => {
+                        const sl = t.slot;
+                        const formula = sl.type === "Stacked"
+                          ? `${sl.disconnectIn}" (stacked) + ${sl.gapIn}" gap`
+                          : `${sl.disconnectIn}" disc + ${sl.divIn}" + ${sl.meterIn}" meter + ${sl.gapIn}" gap`;
+                        return (
+                          <tr key={i}>
+                            <td style={S.td}>{t.name || <em style={{ color: C.muted }}>(unnamed)</em>}</td>
+                            <td style={S.td}><span style={S.pill()}>{t.serviceSize}A</span></td>
+                            <td style={S.td}><span style={slotPill(sl)}>{sl.type}</span></td>
+                            <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>{formula}</td>
+                            <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{sl.totalIn}"</td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ background: C.raised, borderTop: `2px solid ${C.border}` }}>
+                        <td colSpan={3} style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL WALL SPACE NEEDED</td>
+                        <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>30" (tap) + {POST_TAP_GAP}" (gap) + {bw.tenantsIn}" (tenants)</td>
+                        <td style={{
+                          ...S.td, fontWeight: "bold", fontSize: 13,
+                          color: bw.availFt > 0 ? (bw.ok ? C.green : C.red) : C.amber
+                        }}>{bw.totalIn}" = {bw.totalFt.toFixed(3)} ft</td>
+                      </tr>
+                      {bw.availFt > 0 && (
+                        <tr style={{ background: C.raised }}>
+                          <td colSpan={4} style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL AVAILABLE WALL SPACE</td>
+                          <td style={{ ...S.td, color: C.muted, fontWeight: "bold" }}>{bw.availFt} ft</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
                 <WirewayDiagram tenantSlots={bw.tenantSlots} totalIn={bw.totalIn}
-                  totalFt={bw.totalFt} availFt={bw.availFt} />
+                  totalFt={bw.totalFt} availFt={bw.availFt}
+                  totalAmps={bw.tenantSlots.reduce((s, t) => s + (t.amps || 0), 0)} />
               </div>
             );
           })}
@@ -1218,6 +1304,16 @@ export default function App() {
                 <div style={S.sLbl}>{st.l}</div>
               </div>
             ))}
+          </div>
+          <div style={{ ...S.rg2(bp.mobile), marginBottom: 14 }}>
+            <div style={{ ...S.stat, textAlign: "left", display: "flex", gap: 12, alignItems: "center", justifyContent: "center" }} data-r-stat>
+              <span style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase" }}>Tenant Voltage:</span>
+              <span style={{ color: C.amber, fontWeight: "bold", fontSize: 14 }}>{voltage.label}</span>
+            </div>
+            <div style={{ ...S.stat, textAlign: "left", display: "flex", gap: 12, alignItems: "center", justifyContent: "center" }} data-r-stat>
+              <span style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase" }}>House Panel Voltage:</span>
+              <span style={{ color: C.amber, fontWeight: "bold", fontSize: 14 }}>{hpVoltage.label}</span>
+            </div>
           </div>
 
           {allBuildings.map((b) => {
@@ -1260,7 +1356,8 @@ export default function App() {
                 </div>
                 {/* Wireway diagram */}
                 <WirewayDiagram tenantSlots={bw.tenantSlots} totalIn={bw.totalIn}
-                  totalFt={bw.totalFt} availFt={bw.availFt} />
+                  totalFt={bw.totalFt} availFt={bw.availFt}
+                  totalAmps={bw.tenantSlots.reduce((s, t) => s + (t.amps || 0), 0)} />
               </div>
             );
           })}
@@ -1268,28 +1365,28 @@ export default function App() {
           <div style={S.card} data-r-card>
             <div style={S.cardH} data-r-cardh><span>SUMMARY BY CATEGORY</span></div>
             <div style={{ overflowX: "auto" }} data-r-tblwrap>
-            <table style={{ ...S.tbl, maxWidth: 500 }}>
-              <thead><tr>{["Category", "Total S.F.", "KVA"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {catSummary.map((c, i) => (
-                  <tr key={i}>
-                    <td style={{ ...S.td, color: "#94a3b8" }}>{c.name} S.F.:</td>
-                    <td style={S.td}>{c.isHP ? "—" : c.totalSqft.toLocaleString()}</td>
-                    <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{c.totalKVA.toFixed(2)}</td>
+              <table style={{ ...S.tbl, maxWidth: 500 }}>
+                <thead><tr>{["Category", "Total S.F.", "KVA"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {catSummary.map((c, i) => (
+                    <tr key={i}>
+                      <td style={{ ...S.td, color: "#94a3b8" }}>{c.name} S.F.:</td>
+                      <td style={S.td}>{c.isHP ? "—" : c.totalSqft.toLocaleString()}</td>
+                      <td style={{ ...S.td, color: C.amber, fontWeight: "bold" }}>{c.totalKVA.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: C.raised, borderTop: `2px solid ${C.border}` }}>
+                    <td style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL KVA</td>
+                    <td style={S.td} />
+                    <td style={{ ...S.td, color: C.amber, fontWeight: "bold", fontSize: 16 }}>{totalKVA.toFixed(2)}</td>
                   </tr>
-                ))}
-                <tr style={{ background: C.raised, borderTop: `2px solid ${C.border}` }}>
-                  <td style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL KVA</td>
-                  <td style={S.td} />
-                  <td style={{ ...S.td, color: C.amber, fontWeight: "bold", fontSize: 16 }}>{totalKVA.toFixed(2)}</td>
-                </tr>
-                <tr style={{ background: C.raised }}>
-                  <td style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL AMPS</td>
-                  <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>{totalKVA.toFixed(2)} ÷ {voltage.factor}</td>
-                  <td style={{ ...S.td, color: C.blue, fontWeight: "bold", fontSize: 16 }}>{totalAmps.toFixed(6)}</td>
-                </tr>
-              </tbody>
-            </table>
+                  <tr style={{ background: C.raised }}>
+                    <td style={{ ...S.td, color: C.muted, fontSize: 9, letterSpacing: 2 }}>TOTAL AMPS</td>
+                    <td style={{ ...S.td, color: C.muted, fontSize: 10 }}>{totalKVA.toFixed(2)} ÷ {voltage.factor}</td>
+                    <td style={{ ...S.td, color: C.blue, fontWeight: "bold", fontSize: 16 }}>{totalAmps.toFixed(6)}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
