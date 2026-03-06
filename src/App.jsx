@@ -1147,7 +1147,7 @@ export default function App() {
               {sc === "editor" ? "DATA" : sc === "wireway" ? "WIREWAY" : "SUMMARY"}
             </button>
           ))}
-          <button style={S.btn()} onClick={handleSave}>💾 .JSON</button>
+          <button style={S.btn()} onClick={handleSave}>💾 SAVE</button>
           <button style={S.btn(C.blue, "#fff")} onClick={handleExcel}>📊 EXCEL</button>
           <button style={S.btn(C.green, "#000")} onClick={handlePrint}>🖨 PRINT</button>
           <button style={S.ghost} onClick={() => setScreen("home")}>← HOME</button>
@@ -1390,7 +1390,7 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }} data-print-hide>
-            <button style={S.btn()} onClick={handleSave}>💾 SAVE .JSON</button>
+            <button style={S.btn()} onClick={handleSave}>💾 SAVE</button>
             <button style={S.btn(C.blue, "#fff")} onClick={handleExcel}>📊 EXPORT EXCEL</button>
             <button style={S.btn(C.green, "#000")} onClick={handlePrint}>🖨 PRINT / PDF</button>
           </div>
