@@ -1155,8 +1155,6 @@ export default function App() {
             </button>
           ))}
           <button style={S.btn()} onClick={handleSave}>💾 SAVE</button>
-          <button style={S.btn(C.blue, "#fff")} onClick={handleExcel}>📊 EXCEL</button>
-          <button style={S.btn(C.green, "#000")} onClick={handlePrint}>🖨 PRINT</button>
           <button style={S.ghost} onClick={() => setScreen("home")}>← HOME</button>
         </div>
       </div>
