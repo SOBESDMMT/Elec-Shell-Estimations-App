@@ -31,6 +31,13 @@ const calcAmps = (kva, f) => (kva > 0 ? kva / f : 0);
 const DEFAULT_TAP_CAN_IN = 30;
 const POST_TAP_GAP = 6; // 6" gap between tap can and first disconnect
 
+// Format inches as feet-inches: e.g. 18 → 1'-6"
+const inFt = (inches) => {
+  const ft = Math.floor(inches / 12);
+  const ins = inches % 12;
+  return ins === 0 ? `${ft}'-0"` : `${ft}'-${ins}"`;
+};
+
 const DEFAULT_WIREWAY_RULES = [
   { id: "r1", label: "≤ 200A", maxAmps: 200, type: "Stacked", disconnectIn: 19, meterIn: 0, divIn: 0, gapIn: 6 },
   { id: "r2", label: "400–600A", maxAmps: 600, type: "Side by Side", disconnectIn: 30, meterIn: 30, divIn: 6, gapIn: 6 },
@@ -420,7 +427,7 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
             </text>
             <text x={CHAN_X + chanW / 2} y={CHAN_Y + 24}
               fill={C.amber} fontSize={8} fontWeight="bold" textAnchor="middle">
-              {gutterIn}" = {gutterFt.toFixed(2)} ft
+              {gutterIn}" = {inFt(gutterIn)}
             </text>
           </>
         )}
@@ -438,7 +445,7 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
           stroke={ok ? C.green : C.red} strokeWidth={1} />
         <text x={PAD + totalDrawW / 2} y={DIM_Y + 16}
           fill={ok ? C.green : C.red} fontSize={10} textAnchor="middle" fontWeight="bold">
-          {totalIn}" = {totalFt.toFixed(3)} ft
+          {totalIn}" = {inFt(totalIn)}
           {availFt > 0 ? (ok ? `  ✓ OK (${availFt} ft avail.)` : `  ✗ EXCEEDS ${availFt} ft`) : ""}
         </text>
 
@@ -1037,7 +1044,7 @@ export default function App() {
         html += '<td class="bold">' + bComp.reduce((s, t) => s + t.kva, 0).toFixed(2) + '</td>';
         html += '<td class="bold">' + bComp.reduce((s, t) => s + t.amps, 0).toFixed(4) + '</td>';
         html += '<td></td>';
-        html += '<td class="bold">' + bw.totalIn + '" = ' + bw.totalFt.toFixed(2) + ' ft ' + (bw.availFt > 0 ? (bw.ok ? '✓' : '✗') : '') + '</td>';
+        html += '<td class="bold">' + bw.totalIn + '" = ' + inFt(bw.totalIn) + ' ' + (bw.availFt > 0 ? (bw.ok ? '✓' : '✗') : '') + '</td>';
         html += '</tr></tbody></table>';
       });
 
@@ -1216,7 +1223,7 @@ export default function App() {
                 <div style={S.cardH} data-r-cardh>
                   <span>BUILDING {b} — WIREWAY</span>
                   <span style={{ color: bw.availFt > 0 ? (bw.ok ? C.green : C.red) : C.amber, fontWeight: "bold", fontSize: 11 }}>
-                    {bw.totalIn}" = {bw.totalFt.toFixed(3)} ft{bw.availFt > 0 ? (bw.ok ? " ✓ OK" : " ✗ EXCEEDS") : ""}
+                    {bw.totalIn}" = {inFt(bw.totalIn)}{bw.availFt > 0 ? (bw.ok ? " ✓ OK" : " ✗ EXCEEDS") : ""}
                   </span>
                 </div>
 
@@ -1231,7 +1238,7 @@ export default function App() {
                         fontSize: 11, fontWeight: "bold", letterSpacing: 1,
                         color: bw.ok ? C.green : C.red,
                       }}>
-                        {bw.ok ? "✓ FITS" : `✗ OVER by ${(bw.totalFt - bw.availFt).toFixed(2)} ft`}
+                        {bw.ok ? "✓ FITS" : `✗ OVER by ${inFt(Math.round(bw.totalFt * 12) - Math.round(bw.availFt * 12))}`}
                       </span>
                     )}
                   </div>
@@ -1275,7 +1282,7 @@ export default function App() {
                         <td style={{
                           ...S.td, fontWeight: "bold", fontSize: 13,
                           color: bw.availFt > 0 ? (bw.ok ? C.green : C.red) : C.amber
-                        }}>{bw.totalIn}" = {bw.totalFt.toFixed(3)} ft</td>
+                        }}>{bw.totalIn}" = {inFt(bw.totalIn)}</td>
                       </tr>
                       {bw.availFt > 0 && (
                         <tr style={{ background: C.raised }}>
@@ -1347,7 +1354,7 @@ export default function App() {
                         <td style={{ ...S.td, color: C.blue, fontWeight: "bold" }}>{bComp.reduce((s, t) => s + t.amps, 0).toFixed(4)}</td>
                         <td style={S.td} />
                         <td style={{ ...S.td, color: bw.availFt > 0 ? (bw.ok ? C.green : C.red) : C.amber, fontWeight: "bold" }}>
-                          {bw.totalIn}" = {bw.totalFt.toFixed(2)} ft {bw.availFt > 0 ? (bw.ok ? "✓" : "✗") : ""}
+                          {bw.totalIn}" = {inFt(bw.totalIn)} {bw.availFt > 0 ? (bw.ok ? "✓" : "✗") : ""}
                         </td>
                       </tr>
                     </tbody>
