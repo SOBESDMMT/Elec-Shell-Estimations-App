@@ -366,10 +366,17 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
                 <line x1={cx} y1={discTop + BOX_H} x2={cx} y2={discTop + BOX_H + 8}
                   stroke={seg.col} strokeWidth={2} strokeLinecap="round" />
                 {!isSmall && (
-                  <text x={cx} y={discTop - 2}
-                    fill={seg.col} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={0.3}>
-                    {seg.isSecondaryLabel ? "DISC. SW." : "DISCONNECT SW."}
-                  </text>
+                  seg.isSecondaryLabel
+                    /* side-by-side disconnect: label above the box */
+                    ? <text x={cx} y={discTop - 2}
+                      fill={seg.col} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={0.3}>
+                      DISC. SW.
+                    </text>
+                    /* stacked disconnect: abbreviated "D.S." centred inside the box */
+                    : <text x={cx} y={discTop + BOX_H / 2 + 2}
+                      fill={seg.col} fontSize={7} fontWeight="bold" textAnchor="middle" letterSpacing={1}>
+                      D.S.
+                    </text>
                 )}
 
                 {/* ── METER box (only for stacked / showMeter) ── */}
