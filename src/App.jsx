@@ -366,17 +366,11 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
                 <line x1={cx} y1={discTop + BOX_H} x2={cx} y2={discTop + BOX_H + 8}
                   stroke={seg.col} strokeWidth={2} strokeLinecap="round" />
                 {!isSmall && (
-                  seg.isSecondaryLabel
-                    /* side-by-side disconnect: label above the box */
-                    ? <text x={cx} y={discTop - 2}
-                      fill={seg.col} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={0.3}>
-                      DISC. SW.
-                    </text>
-                    /* stacked disconnect: abbreviated "D.S." centred inside the box */
-                    : <text x={cx} y={discTop + BOX_H / 2 + 2}
-                      fill={seg.col} fontSize={7} fontWeight="bold" textAnchor="middle" letterSpacing={1}>
-                      D.S.
-                    </text>
+                  /* DISC. SW. centred inside the box for both stacked and side-by-side */
+                  <text x={cx} y={discTop + BOX_H / 2 + 2}
+                    fill={seg.col} fontSize={7} fontWeight="bold" textAnchor="middle" letterSpacing={0.5}>
+                    DISC. SW.
+                  </text>
                 )}
 
                 {/* ── METER box (only for stacked / showMeter) ── */}
@@ -423,10 +417,10 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
                   <text x={groupCx} y={BOT_Y - 10}
                     fill={C.text} fontSize={Math.min(seg.groupW / 6, 8)} fontWeight="bold" textAnchor="middle">{seg.groupLabel}</text>
                 )}
-                {/* METER label above meter box */}
+                {/* METER label inside meter box, below the circle */}
                 {!isSmall && (
-                  <text x={cx} y={BOT_Y - 2}
-                    fill={C.green} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={0.3}>METER</text>
+                  <text x={cx} y={BOT_Y + BOX_H - 4}
+                    fill={C.green} fontSize={6} fontWeight="bold" textAnchor="middle" letterSpacing={0.5}>METER</text>
                 )}
                 <rect x={sx + 1} y={BOT_Y} width={seg.w - 2} height={BOX_H}
                   fill={C.green} fillOpacity={0.08} stroke={C.green} strokeWidth={1.5} rx={1} />
