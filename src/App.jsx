@@ -224,6 +224,7 @@ const INJECTED_CSS = `
   }
   table { page-break-inside: avoid; }
   svg text { fill: #333 !important; }
+  svg text[data-print-white] { fill: #fff !important; }
   svg rect { stroke: #999 !important; }
   svg line { stroke: #666 !important; }
 }
@@ -441,11 +442,11 @@ function WirewayDiagram({ tenantSlots, totalIn, totalFt, availFt, totalAmps, tap
             <rect x={CHAN_X} y={CHAN_Y} width={chanW} height={CHAN_H}
               fill={C.raised} stroke={C.border} strokeWidth={1.5} rx={1} />
             <text x={CHAN_X + chanW / 2} y={CHAN_Y + 11}
-              fill={C.muted} fontSize={7} textAnchor="middle" letterSpacing={2}>
+              fill={C.muted} fontSize={7} textAnchor="middle" letterSpacing={2} data-print-white>
               METERING GUTTER
             </text>
             <text x={CHAN_X + chanW / 2} y={CHAN_Y + 24}
-              fill={C.amber} fontSize={8} fontWeight="bold" textAnchor="middle">
+              fill={C.amber} fontSize={8} fontWeight="bold" textAnchor="middle" data-print-white>
               {gutterIn}" = {inFt(gutterIn)}
             </text>
           </>
@@ -1017,6 +1018,7 @@ export default function App() {
         .muted { color: #888; }
         svg { display: block; margin: 10px 0; }
         svg text { fill: #333 !important; }
+        svg text[data-print-white] { fill: #fff !important; }
         svg rect { stroke: #666 !important; }
         svg line { stroke: #666 !important; }
         .page-break { page-break-before: always; }
