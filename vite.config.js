@@ -6,5 +6,5 @@ export default defineConfig({
     plugins: [react()],
     // For GitHub Pages: set base to '/<repo-name>/' when deploying
     // For local dev: base defaults to '/'
-    base: process.env.GITHUB_PAGES ? '/electrical-estimator-web/' : '/',
+    base: process.env.GITHUB_PAGES ? '/Elec-Shell-Estimations-App/' : '/',
 })
